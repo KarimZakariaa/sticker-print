@@ -11,8 +11,10 @@
         --shell-inset-x: 0.25mm;
         --shell-inset-y: 1.8mm;
         --shell-border: 0.25mm;
-        --panel-width: 53mm;
-        --panel-height: 68mm;
+        --outer-radius: 2.5mm;
+        --inner-radius: 2.1mm;
+        --panel-width: 50mm;
+        --panel-height: 66mm;
         --panel-top: 110mm;
         --qr-size: 44mm;
         --cut-top: 43mm;
@@ -133,6 +135,7 @@
         break-after: page;
         overflow: hidden;
         background: var(--outer-color);
+        border-radius: var(--outer-radius);
         box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06);
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
@@ -151,26 +154,9 @@
         left: var(--shell-inset-x);
         border: var(--shell-border) solid var(--inner-border);
         background: var(--inner-color);
+        border-radius: var(--inner-radius);
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
-      }
-
-      .cut-line {
-        position: absolute;
-        left: 0;
-        width: 100%;
-        height: 0.45mm;
-        background: #111;
-        -webkit-print-color-adjust: exact;
-        print-color-adjust: exact;
-      }
-
-      .cut-top {
-        top: var(--cut-top);
-      }
-
-      .cut-bottom {
-        bottom: var(--cut-bottom);
       }
 
       .qr-panel {
@@ -181,6 +167,7 @@
         height: var(--panel-height);
         transform: translateX(-50%);
         background: #fff;
+        border-radius: 2mm;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -238,21 +225,11 @@
       <div class="options">
         <div class="field">
           <label for="startSequence">Start sequence</label>
-          <input type="number" id="startSequence" min="1" step="1" value="1">
+          <input type="number" id="startSequence" min="1" max="99999999999" step="1" value="1">
         </div>
         <div class="field">
           <label for="endSequence">End sequence</label>
-          <input type="number" id="endSequence" min="1" step="1" value="9999">
-        </div>
-        <div class="field">
-          <label for="outerColor">Outer color</label>
-          <select id="outerColor">
-            <option value="#f6f4aa" selected>Light Yellow</option>
-            <option value="#ffffff">White</option>
-            <option value="#f2d7a1">Sand</option>
-            <option value="#d9ead3">Mint</option>
-            <option value="#d9e7f7">Pale Blue</option>
-          </select>
+          <input type="number" id="endSequence" min="1" max="99999999999" step="1" value="100">
         </div>
         <div class="field">
           <label for="innerColor">Body color</label>
@@ -263,16 +240,6 @@
             <option value="#2e7d32">Green</option>
             <option value="#1565c0">Blue</option>
             <option value="#212121">Black</option>
-          </select>
-        </div>
-        <div class="field">
-          <label for="borderColor">Border color</label>
-          <select id="borderColor">
-            <option value="#17305a" selected>Navy</option>
-            <option value="#000000">Black</option>
-            <option value="#7a1f1f">Maroon</option>
-            <option value="#1b5e20">Dark Green</option>
-            <option value="#424242">Dark Gray</option>
           </select>
         </div>
       </div>
@@ -288,8 +255,6 @@
     <template id="stickerTemplate">
       <section class="sticker">
         <div class="sticker-shell">
-          <div class="cut-line cut-top"></div>
-          <div class="cut-line cut-bottom"></div>
           <div class="qr-panel">
             <div class="qr-code" aria-hidden="true"></div>
           </div>
@@ -301,9 +266,12 @@
     <script>
       const PREFIX = "G";
       const MIN_SEQUENCE = 1;
+      const MAX_SEQUENCE = 99999999999;
+      const SEQUENCE_DIGITS = 11;
       const DEFAULT_START_SEQUENCE = 1;
-      const DEFAULT_END_SEQUENCE = 9999;
+      const DEFAULT_END_SEQUENCE = 100;
       const RENDER_BATCH_SIZE = 100;
+      const STORAGE_KEY = "gama-sticker-print-settings";
 
       const sheet = document.getElementById("sheet");
       const template = document.getElementById("stickerTemplate");
@@ -311,12 +279,10 @@
       const rangeNote = document.getElementById("rangeNote");
       const startInput = document.getElementById("startSequence");
       const endInput = document.getElementById("endSequence");
-      const outerColorInput = document.getElementById("outerColor");
       const innerColorInput = document.getElementById("innerColor");
-      const borderColorInput = document.getElementById("borderColor");
 
       function formatCode(sequence) {
-        return `${PREFIX}${String(sequence).padStart(7, "0")}`;
+        return `${PREFIX}${String(sequence).padStart(SEQUENCE_DIGITS, "0")}`;
       }
 
       function parseSequence(value, fallback) {
@@ -325,7 +291,7 @@
           return fallback;
         }
 
-        return Math.min(Number.MAX_SAFE_INTEGER, parsed);
+        return Math.min(MAX_SEQUENCE, parsed);
       }
 
       function getSelectedRange() {
@@ -347,20 +313,60 @@
       }
 
       function applyColors() {
-        document.documentElement.style.setProperty("--outer-color", outerColorInput.value);
         document.documentElement.style.setProperty("--inner-color", innerColorInput.value);
-        document.documentElement.style.setProperty("--inner-border", borderColorInput.value);
+      }
+
+      function saveSettings() {
+        const payload = {
+          startSequence: startInput.value,
+          endSequence: endInput.value,
+          innerColor: innerColorInput.value,
+        };
+
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      }
+
+      function restoreSettings() {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) {
+          return;
+        }
+
+        try {
+          const saved = JSON.parse(raw);
+
+          if (saved.startSequence) {
+            startInput.value = saved.startSequence;
+          }
+
+          if (saved.endSequence) {
+            endInput.value = saved.endSequence;
+          }
+
+          if (saved.innerColor) {
+            const optionExists = Array.from(innerColorInput.options).some(
+              (option) => option.value === saved.innerColor
+            );
+
+            if (optionExists) {
+              innerColorInput.value = saved.innerColor;
+            }
+          }
+        } catch (error) {
+          localStorage.removeItem(STORAGE_KEY);
+        }
       }
 
       function updateRangeNote() {
         try {
           const range = getSelectedRange();
           rangeNote.textContent =
-
+            `Allowed range: ${formatCode(MIN_SEQUENCE)} to ${formatCode(MAX_SEQUENCE)}. ` +
             `Selected range: ${formatCode(range.startSequence)} to ${formatCode(range.endSequence)} ` +
             `(${range.count.toLocaleString()} stickers).`;
         } catch (error) {
-          rangeNote.textContent = `On-demand generation for any positive range. ${error.message}`;
+          rangeNote.textContent =
+            `Allowed range: ${formatCode(MIN_SEQUENCE)} to ${formatCode(MAX_SEQUENCE)}. ${error.message}`;
         }
       }
 
@@ -440,12 +446,15 @@
       [startInput, endInput].forEach((input) => {
         input.addEventListener("input", updateRangeNote);
         input.addEventListener("change", updateRangeNote);
+        input.addEventListener("change", saveSettings);
       });
 
-      [outerColorInput, innerColorInput, borderColorInput].forEach((input) => {
-        input.addEventListener("change", applyColors);
+      innerColorInput.addEventListener("change", () => {
+        applyColors();
+        saveSettings();
       });
 
+      restoreSettings();
       applyColors();
       updateRangeNote();
     </script>
