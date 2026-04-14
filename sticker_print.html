@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>GAMA Baggage Sticker Print</title>
+    <style>
+      :root {
+        --label-width: 54mm;
+        --label-height: 300mm;
+        --shell-inset-x: 0.25mm;
+        --shell-inset-y: 1.8mm;
+        --shell-border: 0.25mm;
+        --panel-width: 53mm;
+        --panel-height: 68mm;
+        --panel-top: 110mm;
+        --qr-size: 44mm;
+        --cut-top: 43mm;
+        --cut-bottom: 50mm;
+        --outer-color: #f6f4aa;
+        --inner-color: #ef0707;
+        --inner-border: #17305a;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: Arial, Helvetica, sans-serif;
+        background: #e6e6e6;
+        color: #111;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+
+      body {
+        padding: 14px;
+      }
+
+      .controls {
+        max-width: 920px;
+        margin: 0 auto 20px;
+        padding: 16px 18px;
+        border: 1px solid #b8b8b8;
+        background: #fff;
+      }
+
+      .controls h1 {
+        margin: 0 0 10px;
+        font-size: 22px;
+      }
+
+      .controls p {
+        margin: 6px 0;
+        line-height: 1.5;
+      }
+
+      .options {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 12px;
+        margin-top: 14px;
+      }
+
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .field label {
+        font-size: 14px;
+        font-weight: 700;
+      }
+
+      .field input {
+        width: 100%;
+        padding: 8px 10px;
+        font: inherit;
+        border: 1px solid #b8b8b8;
+      }
+
+      .field select {
+        width: 100%;
+        padding: 8px 10px;
+        font: inherit;
+        border: 1px solid #b8b8b8;
+        background: #fff;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 14px;
+      }
+
+      button {
+        border: 0;
+        padding: 10px 14px;
+        font: inherit;
+        font-weight: 700;
+        color: #fff;
+        background: #17305a;
+        cursor: pointer;
+      }
+
+      button.secondary {
+        background: #4a4a4a;
+      }
+
+      .status {
+        margin-top: 12px;
+        font-weight: 700;
+      }
+
+      .sheet {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        justify-content: center;
+      }
+
+      .sticker {
+        position: relative;
+        width: var(--label-width);
+        height: var(--label-height);
+        page-break-after: always;
+        break-after: page;
+        overflow: hidden;
+        background: var(--outer-color);
+        box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06);
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+
+      .sticker:last-child {
+        page-break-after: auto;
+        break-after: auto;
+      }
+
+      .sticker-shell {
+        position: absolute;
+        top: var(--shell-inset-y);
+        right: var(--shell-inset-x);
+        bottom: var(--shell-inset-y);
+        left: var(--shell-inset-x);
+        border: var(--shell-border) solid var(--inner-border);
+        background: var(--inner-color);
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+
+      .cut-line {
+        position: absolute;
+        left: 0;
+        width: 100%;
+        height: 0.45mm;
+        background: #111;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+
+      .cut-top {
+        top: var(--cut-top);
+      }
+
+      .cut-bottom {
+        bottom: var(--cut-bottom);
+      }
+
+      .qr-panel {
+        position: absolute;
+        top: var(--panel-top);
+        left: 50%;
+        width: var(--panel-width);
+        height: var(--panel-height);
+        transform: translateX(-50%);
+        background: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+
+      .qr-code {
+        width: var(--qr-size);
+        height: var(--qr-size);
+      }
+
+      .qr-code svg {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+
+      @page {
+        size: 54mm 300mm;
+        margin: 0;
+      }
+
+      @media print {
+        html,
+        body {
+          padding: 0;
+          background: #fff;
+        }
+
+        .controls {
+          display: none;
+        }
+
+        .sheet {
+          display: block;
+        }
+
+        .sticker {
+          margin: 0;
+          box-shadow: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <section class="controls">
+      <h1>GAMA Baggage Sticker Print</h1>
+      <p>
+        Sticker size is fixed to <strong>54 mm x 300 mm</strong>. The center white
+        QR block is fixed to <strong>53 mm x 68 mm</strong>
+      </p>
+      <p id="rangeNote"></p>
+      <div class="options">
+        <div class="field">
+          <label for="startSequence">Start sequence</label>
+          <input type="number" id="startSequence" min="1" step="1" value="1">
+        </div>
+        <div class="field">
+          <label for="endSequence">End sequence</label>
+          <input type="number" id="endSequence" min="1" step="1" value="9999">
+        </div>
+        <div class="field">
+          <label for="outerColor">Outer color</label>
+          <select id="outerColor">
+            <option value="#f6f4aa" selected>Light Yellow</option>
+            <option value="#ffffff">White</option>
+            <option value="#f2d7a1">Sand</option>
+            <option value="#d9ead3">Mint</option>
+            <option value="#d9e7f7">Pale Blue</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="innerColor">Body color</label>
+          <select id="innerColor">
+            <option value="#ef0707" selected>Red</option>
+            <option value="#f57c00">Orange</option>
+            <option value="#f2c200">Yellow</option>
+            <option value="#2e7d32">Green</option>
+            <option value="#1565c0">Blue</option>
+            <option value="#212121">Black</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="borderColor">Border color</label>
+          <select id="borderColor">
+            <option value="#17305a" selected>Navy</option>
+            <option value="#000000">Black</option>
+            <option value="#7a1f1f">Maroon</option>
+            <option value="#1b5e20">Dark Green</option>
+            <option value="#424242">Dark Gray</option>
+          </select>
+        </div>
+      </div>
+      <div class="actions">
+        <button type="button" id="fullButton">Load Selected Range</button>
+        <button type="button" id="printButton" class="secondary">Print Selected Range</button>
+      </div>
+      <div class="status" id="status"></div>
+    </section>
+
+    <main class="sheet" id="sheet"></main>
+
+    <template id="stickerTemplate">
+      <section class="sticker">
+        <div class="sticker-shell">
+          <div class="cut-line cut-top"></div>
+          <div class="cut-line cut-bottom"></div>
+          <div class="qr-panel">
+            <div class="qr-code" aria-hidden="true"></div>
+          </div>
+        </div>
+      </section>
+    </template>
+
+    <script src="qrcode.min.js"></script>
+    <script>
+      const PREFIX = "G";
+      const MIN_SEQUENCE = 1;
+      const DEFAULT_START_SEQUENCE = 1;
+      const DEFAULT_END_SEQUENCE = 9999;
+      const RENDER_BATCH_SIZE = 100;
+
+      const sheet = document.getElementById("sheet");
+      const template = document.getElementById("stickerTemplate");
+      const status = document.getElementById("status");
+      const rangeNote = document.getElementById("rangeNote");
+      const startInput = document.getElementById("startSequence");
+      const endInput = document.getElementById("endSequence");
+      const outerColorInput = document.getElementById("outerColor");
+      const innerColorInput = document.getElementById("innerColor");
+      const borderColorInput = document.getElementById("borderColor");
+
+      function formatCode(sequence) {
+        return `${PREFIX}${String(sequence).padStart(7, "0")}`;
+      }
+
+      function parseSequence(value, fallback) {
+        const parsed = Number.parseInt(value, 10);
+        if (Number.isNaN(parsed) || parsed < MIN_SEQUENCE) {
+          return fallback;
+        }
+
+        return Math.min(Number.MAX_SAFE_INTEGER, parsed);
+      }
+
+      function getSelectedRange() {
+        const startSequence = parseSequence(startInput.value, DEFAULT_START_SEQUENCE);
+        const endSequence = parseSequence(endInput.value, DEFAULT_END_SEQUENCE);
+
+        startInput.value = startSequence;
+        endInput.value = endSequence;
+
+        if (startSequence > endSequence) {
+          throw new Error("Start sequence must be less than or equal to end sequence.");
+        }
+
+        return {
+          startSequence,
+          endSequence,
+          count: endSequence - startSequence + 1,
+        };
+      }
+
+      function applyColors() {
+        document.documentElement.style.setProperty("--outer-color", outerColorInput.value);
+        document.documentElement.style.setProperty("--inner-color", innerColorInput.value);
+        document.documentElement.style.setProperty("--inner-border", borderColorInput.value);
+      }
+
+      function updateRangeNote() {
+        try {
+          const range = getSelectedRange();
+          rangeNote.textContent =
+
+            `Selected range: ${formatCode(range.startSequence)} to ${formatCode(range.endSequence)} ` +
+            `(${range.count.toLocaleString()} stickers).`;
+        } catch (error) {
+          rangeNote.textContent = `On-demand generation for any positive range. ${error.message}`;
+        }
+      }
+
+      function createQrMarkup(code) {
+        const qr = qrcode(0, "M");
+        qr.addData(code, "Byte");
+        qr.make();
+        return qr.createSvgTag({
+          cellSize: 4,
+          margin: 0,
+          scalable: true,
+          alt: { text: code },
+        });
+      }
+
+      function makeSticker(code) {
+        const fragment = template.content.cloneNode(true);
+        const qrCode = fragment.querySelector(".qr-code");
+        qrCode.innerHTML = createQrMarkup(code);
+
+        return fragment;
+      }
+
+      async function buildLabels(startSequence, endSequence, limit = null) {
+        sheet.innerHTML = "";
+        const totalInRange = endSequence - startSequence + 1;
+        const stickerLimit = limit === null ? totalInRange : Math.min(limit, totalInRange);
+        status.textContent = `Building ${stickerLimit.toLocaleString()} sticker(s)...`;
+        const finalSequence = startSequence + stickerLimit - 1;
+
+        for (let batchStart = startSequence; batchStart <= finalSequence; batchStart += RENDER_BATCH_SIZE) {
+          const fragment = document.createDocumentFragment();
+          const batchEnd = Math.min(finalSequence, batchStart + RENDER_BATCH_SIZE - 1);
+
+          for (let sequence = batchStart; sequence <= batchEnd; sequence += 1) {
+            fragment.appendChild(makeSticker(formatCode(sequence)));
+          }
+
+          sheet.appendChild(fragment);
+          status.textContent =
+            `Building ${stickerLimit.toLocaleString()} sticker(s)... ` +
+            `${(batchEnd - startSequence + 1).toLocaleString()} complete.`;
+
+          await new Promise((resolve) => requestAnimationFrame(resolve));
+        }
+
+        status.textContent =
+          `Loaded ${stickerLimit.toLocaleString()} sticker(s): ` +
+          `${formatCode(startSequence)} to ${formatCode(finalSequence)}.`;
+      }
+
+      async function buildSelectedRange() {
+        const range = getSelectedRange();
+        await buildLabels(range.startSequence, range.endSequence);
+      }
+
+      async function buildSelectedRangeAndPrint() {
+        const range = getSelectedRange();
+        await buildLabels(range.startSequence, range.endSequence);
+        status.textContent =
+          `Loaded ${range.count.toLocaleString()} sticker(s). Opening print dialog...`;
+        window.print();
+      }
+
+      document.getElementById("fullButton").addEventListener("click", () => {
+        buildSelectedRange().catch((error) => {
+          status.textContent = error.message;
+        });
+      });
+
+      document.getElementById("printButton").addEventListener("click", () => {
+        buildSelectedRangeAndPrint().catch((error) => {
+          status.textContent = error.message;
+        });
+      });
+
+      [startInput, endInput].forEach((input) => {
+        input.addEventListener("input", updateRangeNote);
+        input.addEventListener("change", updateRangeNote);
+      });
+
+      [outerColorInput, innerColorInput, borderColorInput].forEach((input) => {
+        input.addEventListener("change", applyColors);
+      });
+
+      applyColors();
+      updateRangeNote();
+    </script>
+  </body>
+</html>
