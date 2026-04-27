@@ -115,6 +115,11 @@
         background: #4a4a4a;
       }
 
+      button:disabled {
+        cursor: wait;
+        opacity: 0.65;
+      }
+
       .status {
         margin-top: 12px;
         font-weight: 700;
@@ -255,6 +260,7 @@
       </div>
       <div class="actions">
         <button type="button" id="fullButton">Load Selected Range</button>
+        <button type="button" id="downloadPdfButton" class="secondary">Download PDF</button>
         <button type="button" id="printButton" class="secondary">Print Selected Range</button>
       </div>
       <div class="status" id="status"></div>
@@ -282,6 +288,23 @@
       const DEFAULT_END_SEQUENCE = 100;
       const RENDER_BATCH_SIZE = 100;
       const STORAGE_KEY = "gama-sticker-print-settings";
+      const MM_TO_PT = 72 / 25.4;
+      const PDF_LAYOUT = {
+        labelWidth: 54,
+        labelHeight: 300,
+        shellInsetX: 0.25,
+        shellInsetY: 1.8,
+        shellBorder: 0.25,
+        outerRadius: 2.5,
+        innerRadius: 2.1,
+        panelWidth: 50,
+        panelHeight: 56,
+        panelTop: 110,
+        panelRadius: 2,
+        qrSize: 44,
+        outerColor: "#f6f4aa",
+        innerBorder: "#17305a",
+      };
 
       const sheet = document.getElementById("sheet");
       const template = document.getElementById("stickerTemplate");
@@ -290,6 +313,7 @@
       const startInput = document.getElementById("startSequence");
       const endInput = document.getElementById("endSequence");
       const innerColorInput = document.getElementById("innerColor");
+      const downloadPdfButton = document.getElementById("downloadPdfButton");
 
       function formatCode(sequence) {
         return `${PREFIX}${String(sequence).padStart(SEQUENCE_DIGITS, "0")}`;
@@ -400,6 +424,165 @@
         return fragment;
       }
 
+      function mm(value) {
+        return value * MM_TO_PT;
+      }
+
+      function pdfNumber(value) {
+        return Number(value.toFixed(3)).toString();
+      }
+
+      function pdfPoint(value) {
+        return pdfNumber(mm(value));
+      }
+
+      function hexToRgb(hex) {
+        const normalized = hex.replace("#", "");
+        return [
+          Number.parseInt(normalized.slice(0, 2), 16) / 255,
+          Number.parseInt(normalized.slice(2, 4), 16) / 255,
+          Number.parseInt(normalized.slice(4, 6), 16) / 255,
+        ];
+      }
+
+      function pdfColor(hex, operator) {
+        return `${hexToRgb(hex).map(pdfNumber).join(" ")} ${operator}`;
+      }
+
+      function pdfRoundedRect(x, y, width, height, radius) {
+        const r = Math.min(radius, width / 2, height / 2);
+        const c = r * 0.5522847498;
+        const right = x + width;
+        const bottom = y + height;
+
+        return [
+          `${pdfPoint(x + r)} ${pdfPoint(y)} m`,
+          `${pdfPoint(right - r)} ${pdfPoint(y)} l`,
+          `${pdfPoint(right - r + c)} ${pdfPoint(y)} ${pdfPoint(right)} ${pdfPoint(y + r - c)} ${pdfPoint(right)} ${pdfPoint(y + r)} c`,
+          `${pdfPoint(right)} ${pdfPoint(bottom - r)} l`,
+          `${pdfPoint(right)} ${pdfPoint(bottom - r + c)} ${pdfPoint(right - r + c)} ${pdfPoint(bottom)} ${pdfPoint(right - r)} ${pdfPoint(bottom)} c`,
+          `${pdfPoint(x + r)} ${pdfPoint(bottom)} l`,
+          `${pdfPoint(x + r - c)} ${pdfPoint(bottom)} ${pdfPoint(x)} ${pdfPoint(bottom - r + c)} ${pdfPoint(x)} ${pdfPoint(bottom - r)} c`,
+          `${pdfPoint(x)} ${pdfPoint(y + r)} l`,
+          `${pdfPoint(x)} ${pdfPoint(y + r - c)} ${pdfPoint(x + r - c)} ${pdfPoint(y)} ${pdfPoint(x + r)} ${pdfPoint(y)} c`,
+          "h",
+        ].join("\n");
+      }
+
+      function createQrMatrix(code) {
+        const qr = qrcode(0, "M");
+        qr.addData(code, "Byte");
+        qr.make();
+
+        return {
+          size: qr.getModuleCount(),
+          isDark: (row, column) => qr.isDark(row, column),
+        };
+      }
+
+      function createStickerPdfPage(code) {
+        const layout = PDF_LAYOUT;
+        const pageHeight = pdfPoint(layout.labelHeight);
+        const qr = createQrMatrix(code);
+        const qrModuleSize = layout.qrSize / qr.size;
+        const qrX = (layout.labelWidth - layout.qrSize) / 2;
+        const qrY = layout.panelTop + (layout.panelHeight - layout.qrSize) / 2;
+        const panelX = (layout.labelWidth - layout.panelWidth) / 2;
+        const innerColor = innerColorInput.value;
+        const commands = [
+          "q",
+          `1 0 0 -1 0 ${pageHeight} cm`,
+          pdfColor(layout.outerColor, "rg"),
+          pdfRoundedRect(0, 0, layout.labelWidth, layout.labelHeight, layout.outerRadius),
+          "f",
+          pdfColor(innerColor, "rg"),
+          pdfColor(layout.innerBorder, "RG"),
+          `${pdfPoint(layout.shellBorder)} w`,
+          pdfRoundedRect(
+            layout.shellInsetX,
+            layout.shellInsetY,
+            layout.labelWidth - layout.shellInsetX * 2,
+            layout.labelHeight - layout.shellInsetY * 2,
+            layout.innerRadius
+          ),
+          "B",
+          pdfColor("#ffffff", "rg"),
+          pdfRoundedRect(panelX, layout.panelTop, layout.panelWidth, layout.panelHeight, layout.panelRadius),
+          "f",
+          pdfColor("#000000", "rg"),
+        ];
+
+        for (let row = 0; row < qr.size; row += 1) {
+          for (let column = 0; column < qr.size; column += 1) {
+            if (qr.isDark(row, column)) {
+              commands.push(
+                `${pdfPoint(qrX + column * qrModuleSize)} ${pdfPoint(qrY + row * qrModuleSize)} ` +
+                `${pdfPoint(qrModuleSize)} ${pdfPoint(qrModuleSize)} re`
+              );
+            }
+          }
+        }
+
+        commands.push("f", "Q");
+
+        return commands.join("\n");
+      }
+
+      function createPdfDocument(pageContents) {
+        const pageWidth = pdfPoint(PDF_LAYOUT.labelWidth);
+        const pageHeight = pdfPoint(PDF_LAYOUT.labelHeight);
+        const objectCount = 2 + pageContents.length * 2;
+        const objects = new Array(objectCount + 1);
+        const pageRefs = pageContents
+          .map((_, index) => `${3 + index * 2} 0 R`)
+          .join(" ");
+
+        objects[1] = "<< /Type /Catalog /Pages 2 0 R >>";
+        objects[2] = `<< /Type /Pages /Kids [${pageRefs}] /Count ${pageContents.length} >>`;
+
+        pageContents.forEach((content, index) => {
+          const pageObjectId = 3 + index * 2;
+          const contentObjectId = pageObjectId + 1;
+          objects[pageObjectId] =
+            `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Contents ${contentObjectId} 0 R >>`;
+          objects[contentObjectId] =
+            `<< /Length ${content.length} >>\nstream\n${content}\nendstream`;
+        });
+
+        let pdf = "%PDF-1.4\n";
+        const offsets = [0];
+
+        for (let objectId = 1; objectId < objects.length; objectId += 1) {
+          offsets[objectId] = pdf.length;
+          pdf += `${objectId} 0 obj\n${objects[objectId]}\nendobj\n`;
+        }
+
+        const xrefOffset = pdf.length;
+        pdf += `xref\n0 ${objects.length}\n`;
+        pdf += "0000000000 65535 f \n";
+
+        for (let objectId = 1; objectId < objects.length; objectId += 1) {
+          pdf += `${String(offsets[objectId]).padStart(10, "0")} 00000 n \n`;
+        }
+
+        pdf +=
+          `trailer\n<< /Size ${objects.length} /Root 1 0 R >>\n` +
+          `startxref\n${xrefOffset}\n%%EOF`;
+
+        return new Blob([pdf], { type: "application/pdf" });
+      }
+
+      function downloadBlob(blob, fileName) {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 0);
+      }
+
       async function buildLabels(startSequence, endSequence, limit = null) {
         sheet.innerHTML = "";
         const totalInRange = endSequence - startSequence + 1;
@@ -441,6 +624,37 @@
         window.print();
       }
 
+      async function downloadSelectedRangeAsPdf() {
+        const range = getSelectedRange();
+        const pageContents = [];
+        const fileName =
+          `gama-stickers-${formatCode(range.startSequence)}-${formatCode(range.endSequence)}.pdf`;
+
+        downloadPdfButton.disabled = true;
+        status.textContent = `Generating PDF for ${range.count.toLocaleString()} sticker(s)...`;
+
+        try {
+          for (let sequence = range.startSequence; sequence <= range.endSequence; sequence += 1) {
+            pageContents.push(createStickerPdfPage(formatCode(sequence)));
+
+            if (
+              (sequence - range.startSequence + 1) % RENDER_BATCH_SIZE === 0 ||
+              sequence === range.endSequence
+            ) {
+              status.textContent =
+                `Generating PDF for ${range.count.toLocaleString()} sticker(s)... ` +
+                `${(sequence - range.startSequence + 1).toLocaleString()} complete.`;
+              await new Promise((resolve) => requestAnimationFrame(resolve));
+            }
+          }
+
+          downloadBlob(createPdfDocument(pageContents), fileName);
+          status.textContent = `Downloaded ${fileName}.`;
+        } finally {
+          downloadPdfButton.disabled = false;
+        }
+      }
+
       document.getElementById("fullButton").addEventListener("click", () => {
         buildSelectedRange().catch((error) => {
           status.textContent = error.message;
@@ -450,6 +664,13 @@
       document.getElementById("printButton").addEventListener("click", () => {
         buildSelectedRangeAndPrint().catch((error) => {
           status.textContent = error.message;
+        });
+      });
+
+      downloadPdfButton.addEventListener("click", () => {
+        downloadSelectedRangeAsPdf().catch((error) => {
+          status.textContent = error.message;
+          downloadPdfButton.disabled = false;
         });
       });
 
