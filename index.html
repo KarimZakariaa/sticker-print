@@ -111,7 +111,18 @@
         cursor: pointer;
       }
 
-      button.secondary {
+      .button-link {
+        display: inline-flex;
+        align-items: center;
+        padding: 10px 14px;
+        font: inherit;
+        font-weight: 700;
+        color: #fff;
+        text-decoration: none;
+      }
+
+      button.secondary,
+      .button-link.secondary {
         background: #4a4a4a;
       }
 
@@ -262,6 +273,7 @@
         <button type="button" id="fullButton">Load Selected Range</button>
         <button type="button" id="downloadPdfButton" class="secondary">Download PDF</button>
         <button type="button" id="printButton" class="secondary">Print Selected Range</button>
+        <a class="button-link secondary" href="center-qr.html">Center QR Page</a>
       </div>
       <div class="status" id="status"></div>
     </section>

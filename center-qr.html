@@ -1,0 +1,543 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>طباعة QR للمراكز</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: Arial, Helvetica, sans-serif;
+        background: #e6e6e6;
+        color: #111;
+      }
+
+      body {
+        padding: 14px;
+      }
+
+      .controls {
+        max-width: 860px;
+        margin: 0 auto 20px;
+        padding: 16px 18px;
+        border: 1px solid #b8b8b8;
+        background: #fff;
+      }
+
+      h1 {
+        margin: 0 0 10px;
+        font-size: 22px;
+      }
+
+      p {
+        margin: 6px 0;
+        line-height: 1.5;
+      }
+
+      .options {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 12px;
+        margin-top: 14px;
+      }
+
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .field label {
+        font-size: 14px;
+        font-weight: 700;
+      }
+
+      .field input,
+      .field select {
+        width: 100%;
+        padding: 8px 10px;
+        font: inherit;
+        border: 1px solid #b8b8b8;
+        background: #fff;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 14px;
+      }
+
+      button {
+        border: 0;
+        padding: 10px 14px;
+        font: inherit;
+        font-weight: 700;
+        color: #fff;
+        background: #17305a;
+        cursor: pointer;
+      }
+
+      button.secondary {
+        background: #4a4a4a;
+      }
+
+      button:disabled {
+        cursor: wait;
+        opacity: 0.65;
+      }
+
+      .status {
+        margin-top: 12px;
+        font-weight: 700;
+      }
+
+      .sheet {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        justify-content: center;
+        direction: ltr;
+      }
+
+      .qr-page {
+        width: 30mm;
+        height: 30mm;
+        page-break-after: always;
+        break-after: page;
+        overflow: hidden;
+        background: #fff;
+        box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12);
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+
+      .qr-page:last-child {
+        page-break-after: auto;
+        break-after: auto;
+      }
+
+      .qr-code,
+      .qr-code svg {
+        display: block;
+        width: 30mm;
+        height: 30mm;
+      }
+
+      @page {
+        size: 30mm 30mm;
+        margin: 0;
+      }
+
+      @media print {
+        html,
+        body {
+          width: 30mm;
+          padding: 0;
+          background: #fff;
+        }
+
+        .controls {
+          display: none;
+        }
+
+        .sheet {
+          display: block;
+          gap: 0;
+        }
+
+        .qr-page {
+          margin: 0;
+          box-shadow: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <section class="controls">
+      <h1>طباعة QR للمراكز</h1>
+      <p>يتم إنشاء QR لكل رقم من 1 إلى المجموع الكلي، بحجم 3 سم x 3 سم لكل صفحة.</p>
+
+      <div class="options">
+        <div class="field">
+          <label for="boxNumber">رقم المربع</label>
+          <select id="boxNumber">
+            <option value="A96">A96</option>
+            <option value="B95">B95</option>
+            <option value="C113">C113</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="centerNumber">رقم المركز</label>
+          <select id="centerNumber"></select>
+        </div>
+        <div class="field">
+          <label for="totalNumber">المجموع الكلي</label>
+          <input type="number" id="totalNumber" min="0" step="1" value="0">
+        </div>
+      </div>
+
+      <div class="actions">
+        <button type="button" id="generateButton">إنشاء QR</button>
+        <button type="button" id="downloadPdfButton" class="secondary">تحميل PDF</button>
+        <button type="button" id="printButton" class="secondary">طباعة</button>
+      </div>
+      <div class="status" id="status"></div>
+    </section>
+
+    <main class="sheet" id="sheet"></main>
+
+    <template id="qrPageTemplate">
+      <section class="qr-page">
+        <div class="qr-code" aria-hidden="true"></div>
+      </section>
+    </template>
+
+    <script src="qrcode.min.js"></script>
+    <script>
+      const CENTERS_BY_BOX = {
+        A96: ["54", "55", "56"],
+        B95: ["50", "51", "52", "53"],
+        C113: ["46", "47", "48", "49"],
+      };
+      const TOTAL_BY_CENTER = {
+        46: 6331,
+        47: 2247,
+        48: 2953,
+        49: 3075,
+        50: 5116,
+        51: 3995,
+        52: 5445,
+        53: 1991,
+        54: 4597,
+        55: 4914,
+        56: 3568,
+      };
+      const STORAGE_KEY = "center-qr-print-settings";
+      const RENDER_BATCH_SIZE = 100;
+      const MM_TO_PT = 72 / 25.4;
+      const PAGE_SIZE_MM = 30;
+      const SEQUENCE_DIGITS = 4;
+
+      const boxInput = document.getElementById("boxNumber");
+      const centerInput = document.getElementById("centerNumber");
+      const totalInput = document.getElementById("totalNumber");
+      const sheet = document.getElementById("sheet");
+      const template = document.getElementById("qrPageTemplate");
+      const status = document.getElementById("status");
+      const downloadPdfButton = document.getElementById("downloadPdfButton");
+
+      function updateTotalForCenter() {
+        totalInput.value = TOTAL_BY_CENTER[centerInput.value];
+      }
+
+      function updateCenterOptions(preferredValue = "", shouldUpdateTotal = true) {
+        const centers = CENTERS_BY_BOX[boxInput.value];
+        centerInput.innerHTML = "";
+
+        centers.forEach((center) => {
+          const option = document.createElement("option");
+          option.value = center;
+          option.textContent = center;
+          centerInput.appendChild(option);
+        });
+
+        if (centers.includes(preferredValue)) {
+          centerInput.value = preferredValue;
+        }
+
+        if (shouldUpdateTotal) {
+          updateTotalForCenter();
+        }
+      }
+
+      function getSettings() {
+        const totalNumber = Number.parseInt(totalInput.value, 10);
+
+        if (Number.isNaN(totalNumber) || totalNumber < 0) {
+          throw new Error("المجموع الكلي يجب أن يكون رقما صحيحا أكبر من أو يساوي 0.");
+        }
+
+        totalInput.value = totalNumber;
+
+        return {
+          boxNumber: boxInput.value,
+          centerNumber: centerInput.value,
+          totalNumber,
+          count: totalNumber,
+        };
+      }
+
+      function formatQrValue(settings, sequence) {
+        return `${settings.boxNumber} - ${settings.centerNumber} - ${String(sequence).padStart(SEQUENCE_DIGITS, "0")}`;
+      }
+
+      function createQrMarkup(value) {
+        const qr = qrcode(0, "M");
+        qr.addData(value, "Byte");
+        qr.make();
+        return qr.createSvgTag({
+          cellSize: 4,
+          margin: 0,
+          scalable: true,
+          alt: { text: value },
+        });
+      }
+
+      function makeQrPage(value) {
+        const fragment = template.content.cloneNode(true);
+        fragment.querySelector(".qr-code").innerHTML = createQrMarkup(value);
+        return fragment;
+      }
+
+      function saveSettings() {
+        const payload = {
+          boxNumber: boxInput.value,
+          centerNumber: centerInput.value,
+          totalNumber: totalInput.value,
+        };
+
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      }
+
+      function restoreSettings() {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) {
+          updateCenterOptions();
+          return;
+        }
+
+        try {
+          const saved = JSON.parse(raw);
+
+          if (saved.boxNumber && CENTERS_BY_BOX[saved.boxNumber]) {
+            boxInput.value = saved.boxNumber;
+          }
+
+          updateCenterOptions(saved.centerNumber, false);
+
+          if (saved.totalNumber !== undefined) {
+            totalInput.value = saved.totalNumber;
+          } else {
+            updateTotalForCenter();
+          }
+        } catch (error) {
+          localStorage.removeItem(STORAGE_KEY);
+          updateCenterOptions();
+        }
+      }
+
+      function mm(value) {
+        return value * MM_TO_PT;
+      }
+
+      function pdfNumber(value) {
+        return Number(value.toFixed(3)).toString();
+      }
+
+      function pdfPoint(value) {
+        return pdfNumber(mm(value));
+      }
+
+      function createQrMatrix(value) {
+        const qr = qrcode(0, "M");
+        qr.addData(value, "Byte");
+        qr.make();
+
+        return {
+          size: qr.getModuleCount(),
+          isDark: (row, column) => qr.isDark(row, column),
+        };
+      }
+
+      function createPdfPage(value) {
+        const qr = createQrMatrix(value);
+        const moduleSize = PAGE_SIZE_MM / qr.size;
+        const pageHeight = pdfPoint(PAGE_SIZE_MM);
+        const commands = [
+          "q",
+          `1 0 0 -1 0 ${pageHeight} cm`,
+          "1 1 1 rg",
+          `0 0 ${pdfPoint(PAGE_SIZE_MM)} ${pdfPoint(PAGE_SIZE_MM)} re`,
+          "f",
+          "0 0 0 rg",
+        ];
+
+        for (let row = 0; row < qr.size; row += 1) {
+          for (let column = 0; column < qr.size; column += 1) {
+            if (qr.isDark(row, column)) {
+              commands.push(
+                `${pdfPoint(column * moduleSize)} ${pdfPoint(row * moduleSize)} ` +
+                `${pdfPoint(moduleSize)} ${pdfPoint(moduleSize)} re`
+              );
+            }
+          }
+        }
+
+        commands.push("f", "Q");
+
+        return commands.join("\n");
+      }
+
+      function createPdfDocument(pageContents) {
+        const pageSize = pdfPoint(PAGE_SIZE_MM);
+        const objectCount = 2 + pageContents.length * 2;
+        const objects = new Array(objectCount + 1);
+        const pageRefs = pageContents
+          .map((_, index) => `${3 + index * 2} 0 R`)
+          .join(" ");
+
+        objects[1] = "<< /Type /Catalog /Pages 2 0 R >>";
+        objects[2] = `<< /Type /Pages /Kids [${pageRefs}] /Count ${pageContents.length} >>`;
+
+        pageContents.forEach((content, index) => {
+          const pageObjectId = 3 + index * 2;
+          const contentObjectId = pageObjectId + 1;
+          objects[pageObjectId] =
+            `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageSize} ${pageSize}] /Contents ${contentObjectId} 0 R >>`;
+          objects[contentObjectId] =
+            `<< /Length ${content.length} >>\nstream\n${content}\nendstream`;
+        });
+
+        let pdf = "%PDF-1.4\n";
+        const offsets = [0];
+
+        for (let objectId = 1; objectId < objects.length; objectId += 1) {
+          offsets[objectId] = pdf.length;
+          pdf += `${objectId} 0 obj\n${objects[objectId]}\nendobj\n`;
+        }
+
+        const xrefOffset = pdf.length;
+        pdf += `xref\n0 ${objects.length}\n`;
+        pdf += "0000000000 65535 f \n";
+
+        for (let objectId = 1; objectId < objects.length; objectId += 1) {
+          pdf += `${String(offsets[objectId]).padStart(10, "0")} 00000 n \n`;
+        }
+
+        pdf +=
+          `trailer\n<< /Size ${objects.length} /Root 1 0 R >>\n` +
+          `startxref\n${xrefOffset}\n%%EOF`;
+
+        return new Blob([pdf], { type: "application/pdf" });
+      }
+
+      function downloadBlob(blob, fileName) {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 0);
+      }
+
+      async function buildQrPages() {
+        const settings = getSettings();
+        sheet.innerHTML = "";
+        status.textContent = `جاري إنشاء ${settings.count.toLocaleString()} QR...`;
+
+        for (let batchStart = 1; batchStart <= settings.totalNumber; batchStart += RENDER_BATCH_SIZE) {
+          const fragment = document.createDocumentFragment();
+          const batchEnd = Math.min(settings.totalNumber, batchStart + RENDER_BATCH_SIZE - 1);
+
+          for (let sequence = batchStart; sequence <= batchEnd; sequence += 1) {
+            fragment.appendChild(makeQrPage(formatQrValue(settings, sequence)));
+          }
+
+          sheet.appendChild(fragment);
+          status.textContent =
+            `جاري إنشاء ${settings.count.toLocaleString()} QR... ` +
+            `${batchEnd.toLocaleString()} مكتمل.`;
+
+          await new Promise((resolve) => requestAnimationFrame(resolve));
+        }
+
+        saveSettings();
+        status.textContent =
+          `تم إنشاء ${settings.count.toLocaleString()} QR من 1 إلى ${settings.totalNumber}.`;
+      }
+
+      async function buildAndPrint() {
+        const settings = getSettings();
+        await buildQrPages();
+        status.textContent =
+          `تم إنشاء ${settings.count.toLocaleString()} QR. جاري فتح نافذة الطباعة...`;
+        window.print();
+      }
+
+      async function downloadPdf() {
+        const settings = getSettings();
+        const pageContents = [];
+        const fileName =
+          `center-qr-${settings.boxNumber}-${settings.centerNumber}-1-${settings.totalNumber}.pdf`;
+
+        downloadPdfButton.disabled = true;
+        status.textContent = `جاري إنشاء PDF لعدد ${settings.count.toLocaleString()} QR...`;
+
+        try {
+          for (let sequence = 1; sequence <= settings.totalNumber; sequence += 1) {
+            pageContents.push(createPdfPage(formatQrValue(settings, sequence)));
+
+            if (
+              sequence % RENDER_BATCH_SIZE === 0 ||
+              sequence === settings.totalNumber
+            ) {
+              status.textContent =
+                `جاري إنشاء PDF لعدد ${settings.count.toLocaleString()} QR... ` +
+                `${sequence.toLocaleString()} مكتمل.`;
+              await new Promise((resolve) => requestAnimationFrame(resolve));
+            }
+          }
+
+          downloadBlob(createPdfDocument(pageContents), fileName);
+          saveSettings();
+          status.textContent = `تم تحميل ${fileName}.`;
+        } finally {
+          downloadPdfButton.disabled = false;
+        }
+      }
+
+      boxInput.addEventListener("change", () => {
+        updateCenterOptions();
+        saveSettings();
+      });
+
+      centerInput.addEventListener("change", () => {
+        updateTotalForCenter();
+        saveSettings();
+      });
+      totalInput.addEventListener("input", saveSettings);
+      totalInput.addEventListener("change", saveSettings);
+
+      document.getElementById("generateButton").addEventListener("click", () => {
+        buildQrPages().catch((error) => {
+          status.textContent = error.message;
+        });
+      });
+
+      document.getElementById("printButton").addEventListener("click", () => {
+        buildAndPrint().catch((error) => {
+          status.textContent = error.message;
+        });
+      });
+
+      downloadPdfButton.addEventListener("click", () => {
+        downloadPdf().catch((error) => {
+          status.textContent = error.message;
+          downloadPdfButton.disabled = false;
+        });
+      });
+
+      restoreSettings();
+      status.textContent = "اختر رقم المربع ورقم المركز والمجموع الكلي ثم أنشئ QR.";
+    </script>
+  </body>
+</html>
