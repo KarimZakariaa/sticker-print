@@ -98,75 +98,71 @@
         font-weight: 700;
       }
 
-      .sheet {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 12px;
-        justify-content: center;
+      .hall-section {
+        margin-top: 18px;
+        border-top: 1px solid #d4d4d4;
+        padding-top: 14px;
+      }
+
+      .hall-section h2 {
+        margin: 0 0 10px;
+        font-size: 18px;
+      }
+
+      .hall-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 10px;
+      }
+
+      .hall-card {
+        display: grid;
+        gap: 8px;
+        padding: 10px;
+        border: 1px solid #c8c8c8;
+        border-radius: 4px;
+        background: #fafafa;
+      }
+
+      .hall-title {
+        font-size: 18px;
+        font-weight: 700;
+      }
+
+      .hall-meta {
+        display: grid;
+        gap: 4px;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      .hall-ranges {
         direction: ltr;
+        text-align: left;
       }
 
-      .qr-page {
-        width: 30mm;
-        height: 30mm;
-        page-break-after: always;
-        break-after: page;
-        overflow: hidden;
-        background: #fff;
-        box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12);
-        -webkit-print-color-adjust: exact;
-        print-color-adjust: exact;
+      .hall-pdf-button {
+        width: 100%;
+        padding: 8px 10px;
       }
 
-      .qr-page:last-child {
-        page-break-after: auto;
-        break-after: auto;
-      }
-
-      .qr-code,
-      .qr-code svg {
-        display: block;
-        width: 30mm;
-        height: 30mm;
-      }
-
-      @page {
-        size: 30mm 30mm;
-        margin: 0;
-      }
-
-      @media print {
-        html,
-        body {
-          width: 30mm;
-          padding: 0;
-          background: #fff;
-        }
-
-        .controls {
-          display: none;
-        }
-
-        .sheet {
-          display: block;
-          gap: 0;
-        }
-
-        .qr-page {
-          margin: 0;
-          box-shadow: none;
-        }
+      code {
+        direction: ltr;
+        display: inline-block;
       }
     </style>
   </head>
   <body>
     <section class="controls">
       <h1>طباعة QR للمراكز</h1>
-      <p>يتم إنشاء QR لكل رقم من 1 إلى المجموع الكلي، بحجم 3 سم x 3 سم لكل صفحة.</p>
+      <p>
+        اختر المركز لإنشاء QR.
+        محتوى QR يكون بنفس صيغة <code>Square-Center-Hall-0001</code>.
+      </p>
 
       <div class="options">
         <div class="field">
-          <label for="boxNumber">رقم المربع</label>
+          <label for="boxNumber">المربع</label>
           <select id="boxNumber">
             <option value="A96">A96</option>
             <option value="B95">B95</option>
@@ -174,71 +170,188 @@
           </select>
         </div>
         <div class="field">
-          <label for="centerNumber">رقم المركز</label>
+          <label for="centerNumber">المركز</label>
           <select id="centerNumber"></select>
         </div>
         <div class="field">
-          <label for="totalNumber">المجموع الكلي</label>
-          <input type="number" id="totalNumber" min="0" step="1" value="0">
+          <label for="totalNumber">إجمالي QR</label>
+          <input type="number" id="totalNumber" min="0" step="1" value="0" readonly>
         </div>
       </div>
 
       <div class="actions">
-        <button type="button" id="generateButton">إنشاء QR</button>
-        <button type="button" id="downloadPdfButton" class="secondary">تحميل PDF</button>
-        <button type="button" id="printButton" class="secondary">طباعة</button>
+        <button type="button" id="downloadCenterPdfButton">تحميل PDF للمركز</button>
+        <button type="button" id="downloadHallPdfButton" class="secondary">تحميل PDF لكل قاعة</button>
       </div>
       <div class="status" id="status"></div>
-    </section>
 
-    <main class="sheet" id="sheet"></main>
-
-    <template id="qrPageTemplate">
-      <section class="qr-page">
-        <div class="qr-code" aria-hidden="true"></div>
+      <section class="hall-section" aria-labelledby="hallGridTitle">
+        <h2 id="hallGridTitle">القاعات</h2>
+        <div class="hall-grid" id="hallGrid"></div>
       </section>
-    </template>
+    </section>
 
     <script src="qrcode.min.js"></script>
     <script>
-      const CENTERS_BY_BOX = {
+      const CENTER_GROUPS_BY_BOX = {
         A96: ["54", "55", "56"],
         B95: ["50", "51", "52", "53"],
         C113: ["46", "47", "48", "49"],
-      };
-      const TOTAL_BY_CENTER = {
-        46: 6331,
-        47: 2247,
-        48: 2953,
-        49: 3075,
-        50: 5116,
-        51: 3995,
-        52: 5445,
-        53: 1991,
-        54: 4597,
-        55: 4914,
-        56: 3568,
       };
       const STORAGE_KEY = "center-qr-print-settings";
       const RENDER_BATCH_SIZE = 100;
       const MM_TO_PT = 72 / 25.4;
       const PAGE_SIZE_MM = 30;
       const SEQUENCE_DIGITS = 4;
+      const collator = new Intl.Collator("en", {
+        numeric: true,
+        sensitivity: "base",
+      });
 
       const boxInput = document.getElementById("boxNumber");
       const centerInput = document.getElementById("centerNumber");
       const totalInput = document.getElementById("totalNumber");
-      const sheet = document.getElementById("sheet");
-      const template = document.getElementById("qrPageTemplate");
       const status = document.getElementById("status");
-      const downloadPdfButton = document.getElementById("downloadPdfButton");
+      const hallGrid = document.getElementById("hallGrid");
+      const downloadCenterPdfButton = document.getElementById("downloadCenterPdfButton");
+      const downloadHallPdfButton = document.getElementById("downloadHallPdfButton");
 
-      function updateTotalForCenter() {
-        totalInput.value = TOTAL_BY_CENTER[centerInput.value];
+      let hallRows = [];
+
+      function setBusy(isBusy) {
+        downloadCenterPdfButton.disabled = isBusy;
+        downloadHallPdfButton.disabled = isBusy;
+        hallGrid.querySelectorAll(".hall-pdf-button").forEach((button) => {
+          button.disabled = isBusy;
+        });
       }
 
-      function updateCenterOptions(preferredValue = "", shouldUpdateTotal = true) {
-        const centers = CENTERS_BY_BOX[boxInput.value];
+      function getAvailableCentersForBox(boxNumber) {
+        const availableCenters = new Set(
+          hallRows.map((row) => String(row.Center))
+        );
+
+        return (CENTER_GROUPS_BY_BOX[boxNumber] || []).filter((center) =>
+          availableCenters.has(center)
+        );
+      }
+
+      function getHallGroupsForCenter(centerNumber) {
+        const groupsByHall = new Map();
+
+        hallRows
+          .filter((row) => String(row.Center) === String(centerNumber))
+          .sort((left, right) => {
+            const hallComparison = collator.compare(left.Hall, right.Hall);
+            return hallComparison || left.Start - right.Start;
+          })
+          .forEach((row) => {
+            const range = {
+              square: String(row.Square),
+              center: String(row.Center),
+              hall: String(row.Hall),
+              start: Number(row.Start),
+              end: Number(row.End),
+            };
+            const existing = groupsByHall.get(range.hall);
+
+            if (existing) {
+              existing.ranges.push(range);
+              existing.minStart = Math.min(existing.minStart, range.start);
+              existing.maxEnd = Math.max(existing.maxEnd, range.end);
+              existing.total += range.end - range.start + 1;
+              return;
+            }
+
+            groupsByHall.set(range.hall, {
+              square: range.square,
+              center: range.center,
+              hall: range.hall,
+              ranges: [range],
+              minStart: range.start,
+              maxEnd: range.end,
+              total: range.end - range.start + 1,
+            });
+          });
+
+        return Array.from(groupsByHall.values()).sort((left, right) =>
+          collator.compare(left.hall, right.hall)
+        );
+      }
+
+      function updateTotalForCenter() {
+        const hallGroups = getHallGroupsForCenter(centerInput.value);
+        const qrCount = hallGroups.reduce(
+          (total, hallGroup) => total + hallGroup.total,
+          0
+        );
+
+        totalInput.value = qrCount;
+        renderHallGrid(hallGroups);
+        status.textContent =
+          hallGroups.length > 0
+            ? `تم اختيار ${hallGroups.length.toLocaleString()} قاعة، بإجمالي ${qrCount.toLocaleString()} QR.`
+            : "لا توجد قاعات لهذا المركز.";
+      }
+
+      function formatHallRanges(hallGroup) {
+        return hallGroup.ranges
+          .map((range) =>
+            `${range.square}-${range.center}-${range.hall}: ` +
+            `${range.start.toLocaleString()} - ${range.end.toLocaleString()}`
+          )
+          .join(" | ");
+      }
+
+      function renderHallGrid(hallGroups) {
+        hallGrid.innerHTML = "";
+
+        if (hallGroups.length === 0) {
+          const emptyMessage = document.createElement("p");
+          emptyMessage.textContent = "لا توجد قاعات لعرضها.";
+          hallGrid.appendChild(emptyMessage);
+          return;
+        }
+
+        const fragment = document.createDocumentFragment();
+
+        hallGroups.forEach((hallGroup) => {
+          const card = document.createElement("article");
+          card.className = "hall-card";
+
+          const title = document.createElement("div");
+          title.className = "hall-title";
+          title.textContent = hallGroup.hall;
+
+          const meta = document.createElement("div");
+          meta.className = "hall-meta";
+
+          const square = document.createElement("div");
+          square.textContent = `المربع: ${hallGroup.square}`;
+
+          const count = document.createElement("div");
+          count.textContent = `عدد QR: ${hallGroup.total.toLocaleString()}`;
+
+          const ranges = document.createElement("div");
+          ranges.className = "hall-ranges";
+          ranges.textContent = formatHallRanges(hallGroup);
+
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "hall-pdf-button";
+          button.dataset.hall = hallGroup.hall;
+          button.textContent = "تحميل PDF";
+
+          meta.append(square, count, ranges);
+          card.append(title, meta, button);
+          fragment.appendChild(card);
+        });
+
+        hallGrid.appendChild(fragment);
+      }
+
+      function updateCenterOptions(preferredValue = "") {
+        const centers = getAvailableCentersForBox(boxInput.value);
         centerInput.innerHTML = "";
 
         centers.forEach((center) => {
@@ -252,55 +365,50 @@
           centerInput.value = preferredValue;
         }
 
-        if (shouldUpdateTotal) {
-          updateTotalForCenter();
-        }
+        updateTotalForCenter();
       }
 
       function getSettings() {
-        const totalNumber = Number.parseInt(totalInput.value, 10);
-
-        if (Number.isNaN(totalNumber) || totalNumber < 0) {
-          throw new Error("المجموع الكلي يجب أن يكون رقما صحيحا أكبر من أو يساوي 0.");
+        if (hallRows.length === 0) {
+          throw new Error("جاري تحميل بيانات القاعات.");
         }
 
-        totalInput.value = totalNumber;
+        const hallGroups = getHallGroupsForCenter(centerInput.value);
+
+        if (hallGroups.length === 0) {
+          throw new Error("لا توجد قاعات لهذا المركز.");
+        }
+
+        const totalNumber = hallGroups.reduce(
+          (total, hallGroup) => total + hallGroup.total,
+          0
+        );
 
         return {
           boxNumber: boxInput.value,
           centerNumber: centerInput.value,
           totalNumber,
           count: totalNumber,
+          hallGroups,
         };
       }
 
-      function formatQrValue(settings, sequence) {
-        return `${settings.boxNumber} - ${settings.centerNumber} - ${String(sequence).padStart(SEQUENCE_DIGITS, "0")}`;
+      function formatQrValue(range, sequence) {
+        return `${range.square}-${range.center}-${range.hall}-${String(sequence).padStart(SEQUENCE_DIGITS, "0")}`;
       }
 
-      function createQrMarkup(value) {
-        const qr = qrcode(0, "M");
-        qr.addData(value, "Byte");
-        qr.make();
-        return qr.createSvgTag({
-          cellSize: 4,
-          margin: 0,
-          scalable: true,
-          alt: { text: value },
+      function forEachHallSequence(hallGroup, callback) {
+        hallGroup.ranges.forEach((range) => {
+          for (let sequence = range.start; sequence <= range.end; sequence += 1) {
+            callback(range, sequence);
+          }
         });
-      }
-
-      function makeQrPage(value) {
-        const fragment = template.content.cloneNode(true);
-        fragment.querySelector(".qr-code").innerHTML = createQrMarkup(value);
-        return fragment;
       }
 
       function saveSettings() {
         const payload = {
           boxNumber: boxInput.value,
           centerNumber: centerInput.value,
-          totalNumber: totalInput.value,
         };
 
         localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
@@ -308,6 +416,7 @@
 
       function restoreSettings() {
         const raw = localStorage.getItem(STORAGE_KEY);
+
         if (!raw) {
           updateCenterOptions();
           return;
@@ -316,17 +425,11 @@
         try {
           const saved = JSON.parse(raw);
 
-          if (saved.boxNumber && CENTERS_BY_BOX[saved.boxNumber]) {
+          if (saved.boxNumber && CENTER_GROUPS_BY_BOX[saved.boxNumber]) {
             boxInput.value = saved.boxNumber;
           }
 
-          updateCenterOptions(saved.centerNumber, false);
-
-          if (saved.totalNumber !== undefined) {
-            totalInput.value = saved.totalNumber;
-          } else {
-            updateTotalForCenter();
-          }
+          updateCenterOptions(saved.centerNumber);
         } catch (error) {
           localStorage.removeItem(STORAGE_KEY);
           updateCenterOptions();
@@ -439,69 +542,157 @@
         setTimeout(() => URL.revokeObjectURL(url), 0);
       }
 
-      async function buildQrPages() {
-        const settings = getSettings();
-        sheet.innerHTML = "";
-        status.textContent = `جاري إنشاء ${settings.count.toLocaleString()} QR...`;
+      async function createPageContentsForHallGroups(hallGroups, onProgress) {
+        const pageContents = [];
+        const total = hallGroups.reduce(
+          (sum, hallGroup) => sum + hallGroup.total,
+          0
+        );
+        let completed = 0;
 
-        for (let batchStart = 1; batchStart <= settings.totalNumber; batchStart += RENDER_BATCH_SIZE) {
-          const fragment = document.createDocumentFragment();
-          const batchEnd = Math.min(settings.totalNumber, batchStart + RENDER_BATCH_SIZE - 1);
+        for (const hallGroup of hallGroups) {
+          forEachHallSequence(hallGroup, (range, sequence) => {
+            pageContents.push(createPdfPage(formatQrValue(range, sequence)));
+            completed += 1;
+          });
 
-          for (let sequence = batchStart; sequence <= batchEnd; sequence += 1) {
-            fragment.appendChild(makeQrPage(formatQrValue(settings, sequence)));
-          }
-
-          sheet.appendChild(fragment);
-          status.textContent =
-            `جاري إنشاء ${settings.count.toLocaleString()} QR... ` +
-            `${batchEnd.toLocaleString()} مكتمل.`;
-
+          onProgress(completed, total);
           await new Promise((resolve) => requestAnimationFrame(resolve));
         }
 
-        saveSettings();
-        status.textContent =
-          `تم إنشاء ${settings.count.toLocaleString()} QR من 1 إلى ${settings.totalNumber}.`;
+        return pageContents;
       }
 
-      async function buildAndPrint() {
-        const settings = getSettings();
-        await buildQrPages();
-        status.textContent =
-          `تم إنشاء ${settings.count.toLocaleString()} QR. جاري فتح نافذة الطباعة...`;
-        window.print();
+      function getHallPdfFileName(hallGroup) {
+        return (
+          `center-qr-${hallGroup.square}-${hallGroup.center}-${hallGroup.hall}-` +
+          `${hallGroup.minStart}-${hallGroup.maxEnd}.pdf`
+        );
       }
 
-      async function downloadPdf() {
-        const settings = getSettings();
-        const pageContents = [];
-        const fileName =
-          `center-qr-${settings.boxNumber}-${settings.centerNumber}-1-${settings.totalNumber}.pdf`;
+      async function downloadSingleHallPdf(hallGroup) {
+        const fileName = getHallPdfFileName(hallGroup);
 
-        downloadPdfButton.disabled = true;
-        status.textContent = `جاري إنشاء PDF لعدد ${settings.count.toLocaleString()} QR...`;
+        setBusy(true);
+        status.textContent = `جاري إنشاء PDF للقاعة ${hallGroup.hall}...`;
 
         try {
-          for (let sequence = 1; sequence <= settings.totalNumber; sequence += 1) {
-            pageContents.push(createPdfPage(formatQrValue(settings, sequence)));
-
-            if (
-              sequence % RENDER_BATCH_SIZE === 0 ||
-              sequence === settings.totalNumber
-            ) {
+          const pageContents = await createPageContentsForHallGroups(
+            [hallGroup],
+            (completed, total) => {
               status.textContent =
-                `جاري إنشاء PDF لعدد ${settings.count.toLocaleString()} QR... ` +
-                `${sequence.toLocaleString()} مكتمل.`;
-              await new Promise((resolve) => requestAnimationFrame(resolve));
+                `جاري إنشاء PDF للقاعة ${hallGroup.hall}... ` +
+                `${completed.toLocaleString()} من ${total.toLocaleString()} مكتمل.`;
             }
-          }
+          );
 
           downloadBlob(createPdfDocument(pageContents), fileName);
           saveSettings();
           status.textContent = `تم تحميل ${fileName}.`;
         } finally {
-          downloadPdfButton.disabled = false;
+          setBusy(false);
+        }
+      }
+
+      async function downloadCenterPdf() {
+        const settings = getSettings();
+        const fileName = `center-qr-center-${settings.centerNumber}.pdf`;
+
+        setBusy(true);
+        status.textContent = `جاري إنشاء PDF واحد للمركز ${settings.centerNumber}...`;
+
+        try {
+          const pageContents = await createPageContentsForHallGroups(
+            settings.hallGroups,
+            (completed, total) => {
+              status.textContent =
+                `جاري إنشاء PDF واحد للمركز ${settings.centerNumber}... ` +
+                `${completed.toLocaleString()} من ${total.toLocaleString()} مكتمل.`;
+            }
+          );
+
+          downloadBlob(createPdfDocument(pageContents), fileName);
+          saveSettings();
+          status.textContent = `تم تحميل ${fileName}.`;
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      async function downloadHallPdfs() {
+        const settings = getSettings();
+        let completedHalls = 0;
+
+        setBusy(true);
+        status.textContent =
+          `جاري إنشاء ${settings.hallGroups.length.toLocaleString()} ملفات PDF للمركز ${settings.centerNumber}...`;
+
+        try {
+          for (const hallGroup of settings.hallGroups) {
+            const fileName = getHallPdfFileName(hallGroup);
+            const pageContents = await createPageContentsForHallGroups(
+              [hallGroup],
+              (completed, total) => {
+                status.textContent =
+                  `جاري إنشاء PDF للقاعة ${hallGroup.hall}... ` +
+                  `${completed.toLocaleString()} من ${total.toLocaleString()} مكتمل.`;
+              }
+            );
+
+            downloadBlob(createPdfDocument(pageContents), fileName);
+            completedHalls += 1;
+            status.textContent =
+              `تم إنشاء ${completedHalls.toLocaleString()} من ` +
+              `${settings.hallGroups.length.toLocaleString()} ملفات PDF للمركز ${settings.centerNumber}.`;
+            await new Promise((resolve) => requestAnimationFrame(resolve));
+          }
+
+          saveSettings();
+          status.textContent =
+            `تم تحميل ${settings.hallGroups.length.toLocaleString()} ملفات PDF للقاعات في المركز ${settings.centerNumber}.`;
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      async function loadHallData() {
+        setBusy(true);
+        status.textContent = "جاري تحميل بيانات القاعات...";
+
+        try {
+          const response = await fetch("data.json", { cache: "no-store" });
+
+          if (!response.ok) {
+            throw new Error(`تعذر تحميل data.json (${response.status}).`);
+          }
+
+          hallRows = (await response.json())
+            .map((row) => ({
+              Square: String(row.Square),
+              Center: String(row.Center),
+              Hall: String(row.Hall),
+              Start: Number(row.Start),
+              End: Number(row.End),
+            }))
+            .filter((row) =>
+              row.Square &&
+              row.Center &&
+              row.Hall &&
+              Number.isInteger(row.Start) &&
+              Number.isInteger(row.End) &&
+              row.Start <= row.End
+            );
+
+          if (hallRows.length === 0) {
+            throw new Error("ملف data.json لا يحتوي على نطاقات قاعات صحيحة.");
+          }
+
+          restoreSettings();
+          saveSettings();
+        } catch (error) {
+          status.textContent = error.message;
+        } finally {
+          setBusy(false);
         }
       }
 
@@ -514,30 +705,44 @@
         updateTotalForCenter();
         saveSettings();
       });
-      totalInput.addEventListener("input", saveSettings);
-      totalInput.addEventListener("change", saveSettings);
 
-      document.getElementById("generateButton").addEventListener("click", () => {
-        buildQrPages().catch((error) => {
+      hallGrid.addEventListener("click", (event) => {
+        const button = event.target.closest(".hall-pdf-button");
+
+        if (!button) {
+          return;
+        }
+
+        const hallGroup = getHallGroupsForCenter(centerInput.value).find(
+          (group) => group.hall === button.dataset.hall
+        );
+
+        if (!hallGroup) {
+          status.textContent = "تعذر العثور على بيانات هذه القاعة.";
+          return;
+        }
+
+        downloadSingleHallPdf(hallGroup).catch((error) => {
           status.textContent = error.message;
+          setBusy(false);
         });
       });
 
-      document.getElementById("printButton").addEventListener("click", () => {
-        buildAndPrint().catch((error) => {
+      downloadCenterPdfButton.addEventListener("click", () => {
+        downloadCenterPdf().catch((error) => {
           status.textContent = error.message;
+          setBusy(false);
         });
       });
 
-      downloadPdfButton.addEventListener("click", () => {
-        downloadPdf().catch((error) => {
+      downloadHallPdfButton.addEventListener("click", () => {
+        downloadHallPdfs().catch((error) => {
           status.textContent = error.message;
-          downloadPdfButton.disabled = false;
+          setBusy(false);
         });
       });
 
-      restoreSettings();
-      status.textContent = "اختر رقم المربع ورقم المركز والمجموع الكلي ثم أنشئ QR.";
+      loadHallData();
     </script>
   </body>
 </html>
