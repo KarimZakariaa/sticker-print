@@ -181,17 +181,18 @@
 
       <div class="actions">
         <button type="button" id="downloadCenterPdfButton">تحميل PDF للمركز</button>
-        <button type="button" id="downloadHallPdfButton" class="secondary">تحميل PDF لكل قاعة</button>
+        <button type="button" id="downloadHallPdfButton" class="secondary">تحميل PDF منفصل لكل صالة</button>
       </div>
       <div class="status" id="status"></div>
 
       <section class="hall-section" aria-labelledby="hallGridTitle">
-        <h2 id="hallGridTitle">القاعات</h2>
+        <h2 id="hallGridTitle">الصالات</h2>
         <div class="hall-grid" id="hallGrid"></div>
       </section>
     </section>
 
     <script src="qrcode.min.js"></script>
+    <script src="data.js"></script>
     <script>
       const CENTER_GROUPS_BY_BOX = {
         A96: ["54", "55", "56"],
@@ -290,8 +291,8 @@
         renderHallGrid(hallGroups);
         status.textContent =
           hallGroups.length > 0
-            ? `تم اختيار ${hallGroups.length.toLocaleString()} قاعة، بإجمالي ${qrCount.toLocaleString()} QR.`
-            : "لا توجد قاعات لهذا المركز.";
+            ? `تم اختيار ${hallGroups.length.toLocaleString()} صالة، بإجمالي ${qrCount.toLocaleString()} QR.`
+            : "لا توجد صالات لهذا المركز.";
       }
 
       function formatHallRanges(hallGroup) {
@@ -308,7 +309,7 @@
 
         if (hallGroups.length === 0) {
           const emptyMessage = document.createElement("p");
-          emptyMessage.textContent = "لا توجد قاعات لعرضها.";
+          emptyMessage.textContent = "لا توجد صالات لعرضها.";
           hallGrid.appendChild(emptyMessage);
           return;
         }
@@ -370,13 +371,13 @@
 
       function getSettings() {
         if (hallRows.length === 0) {
-          throw new Error("جاري تحميل بيانات القاعات.");
+          throw new Error("جاري تحميل بيانات الصالات.");
         }
 
         const hallGroups = getHallGroupsForCenter(centerInput.value);
 
         if (hallGroups.length === 0) {
-          throw new Error("لا توجد قاعات لهذا المركز.");
+          throw new Error("لا توجد صالات لهذا المركز.");
         }
 
         const totalNumber = hallGroups.reduce(
@@ -574,14 +575,14 @@
         const fileName = getHallPdfFileName(hallGroup);
 
         setBusy(true);
-        status.textContent = `جاري إنشاء PDF للقاعة ${hallGroup.hall}...`;
+        status.textContent = `جاري إنشاء PDF للصالة ${hallGroup.hall}...`;
 
         try {
           const pageContents = await createPageContentsForHallGroups(
             [hallGroup],
             (completed, total) => {
               status.textContent =
-                `جاري إنشاء PDF للقاعة ${hallGroup.hall}... ` +
+                `جاري إنشاء PDF للصالة ${hallGroup.hall}... ` +
                 `${completed.toLocaleString()} من ${total.toLocaleString()} مكتمل.`;
             }
           );
@@ -634,7 +635,7 @@
               [hallGroup],
               (completed, total) => {
                 status.textContent =
-                  `جاري إنشاء PDF للقاعة ${hallGroup.hall}... ` +
+                  `جاري إنشاء PDF للصالة ${hallGroup.hall}... ` +
                   `${completed.toLocaleString()} من ${total.toLocaleString()} مكتمل.`;
               }
             );
@@ -649,24 +650,14 @@
 
           saveSettings();
           status.textContent =
-            `تم تحميل ${settings.hallGroups.length.toLocaleString()} ملفات PDF للقاعات في المركز ${settings.centerNumber}.`;
+            `تم تحميل ${settings.hallGroups.length.toLocaleString()} ملفات PDF للصالات في المركز ${settings.centerNumber}.`;
         } finally {
           setBusy(false);
         }
       }
 
-      async function loadHallData() {
-        setBusy(true);
-        status.textContent = "جاري تحميل بيانات القاعات...";
-
-        try {
-          const response = await fetch("data.json", { cache: "no-store" });
-
-          if (!response.ok) {
-            throw new Error(`تعذر تحميل data.json (${response.status}).`);
-          }
-
-          hallRows = (await response.json())
+      function normalizeHallRows(rows) {
+        return rows
             .map((row) => ({
               Square: String(row.Square),
               Center: String(row.Center),
@@ -682,9 +673,35 @@
               Number.isInteger(row.End) &&
               row.Start <= row.End
             );
+      }
+
+      async function loadHallData() {
+        setBusy(true);
+        status.textContent = "جاري تحميل بيانات الصالات...";
+
+        try {
+          let rows = Array.isArray(window.CENTER_QR_DATA)
+            ? window.CENTER_QR_DATA
+            : null;
+
+          if (!rows) {
+            if (window.location.protocol === "file:") {
+              throw new Error("تعذر تحميل data.js. تأكد أن الملف موجود بجانب center-qr.html.");
+            }
+
+            const response = await fetch("data.json", { cache: "no-store" });
+
+            if (!response.ok) {
+              throw new Error(`تعذر تحميل data.json (${response.status}).`);
+            }
+
+            rows = await response.json();
+          }
+
+          hallRows = normalizeHallRows(rows);
 
           if (hallRows.length === 0) {
-            throw new Error("ملف data.json لا يحتوي على نطاقات قاعات صحيحة.");
+            throw new Error("ملف data.json لا يحتوي على نطاقات صالات صحيحة.");
           }
 
           restoreSettings();
@@ -718,7 +735,7 @@
         );
 
         if (!hallGroup) {
-          status.textContent = "تعذر العثور على بيانات هذه القاعة.";
+          status.textContent = "تعذر العثور على بيانات هذه الصالة.";
           return;
         }
 
