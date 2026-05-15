@@ -204,6 +204,7 @@
       const MM_TO_PT = 72 / 25.4;
       const PAGE_SIZE_MM = 30;
       const SEQUENCE_DIGITS = 4;
+      const QR_SCAN_PREFIX = "https://app.madarapp.com/scan?qrCode=";
       const collator = new Intl.Collator("en", {
         numeric: true,
         sensitivity: "base",
@@ -395,7 +396,8 @@
       }
 
       function formatQrValue(range, sequence) {
-        return `${range.square}-${range.center}-${range.hall}-${String(sequence).padStart(SEQUENCE_DIGITS, "0")}`;
+        const qrCode = `${range.square}-${range.center}-${range.hall}-${String(sequence).padStart(SEQUENCE_DIGITS, "0")}`;
+        return `${QR_SCAN_PREFIX}${qrCode.replace(/\s+/g, "")}`;
       }
 
       function forEachHallSequence(hallGroup, callback) {
