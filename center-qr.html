@@ -203,6 +203,10 @@
       const RENDER_BATCH_SIZE = 100;
       const MM_TO_PT = 72 / 25.4;
       const PAGE_SIZE_MM = 30;
+      const QR_IMAGE_SIZE_MM = 23;
+      const QR_IMAGE_TOP_MM = 2;
+      const LABEL_MAX_WIDTH_MM = 28;
+      const LABEL_BASELINE_MM = 2.1;
       const SEQUENCE_DIGITS = 4;
       const QR_SCAN_PREFIX = "https://app.madarapp.com/scan?qrCode=";
       const collator = new Intl.Collator("en", {
@@ -395,9 +399,13 @@
         };
       }
 
+      function formatQrCodeValue(range, sequence) {
+        return `${range.square}-${range.center}-${range.hall}-${String(sequence).padStart(SEQUENCE_DIGITS, "0")}`
+          .replace(/\s+/g, "");
+      }
+
       function formatQrValue(range, sequence) {
-        const qrCode = `${range.square}-${range.center}-${range.hall}-${String(sequence).padStart(SEQUENCE_DIGITS, "0")}`;
-        return `${QR_SCAN_PREFIX}${qrCode.replace(/\s+/g, "")}`;
+        return `${QR_SCAN_PREFIX}${formatQrCodeValue(range, sequence)}`;
       }
 
       function forEachHallSequence(hallGroup, callback) {
@@ -462,10 +470,26 @@
         };
       }
 
-      function createPdfPage(value) {
+      function escapePdfText(value) {
+        return String(value).replace(/[\\()]/g, "\\$&");
+      }
+
+      function getLabelFontSize(label) {
+        const estimatedTextWidthAtOnePoint = Math.max(label.length * 0.55, 1);
+        return Math.max(
+          3,
+          Math.min(5, mm(LABEL_MAX_WIDTH_MM) / estimatedTextWidthAtOnePoint)
+        );
+      }
+
+      function createPdfPage(value, label) {
         const qr = createQrMatrix(value);
-        const moduleSize = PAGE_SIZE_MM / qr.size;
+        const moduleSize = QR_IMAGE_SIZE_MM / qr.size;
+        const qrOffset = (PAGE_SIZE_MM - QR_IMAGE_SIZE_MM) / 2;
         const pageHeight = pdfPoint(PAGE_SIZE_MM);
+        const labelFontSize = getLabelFontSize(label);
+        const estimatedLabelWidth = label.length * labelFontSize * 0.55;
+        const labelX = Math.max(0, (mm(PAGE_SIZE_MM) - estimatedLabelWidth) / 2);
         const commands = [
           "q",
           `1 0 0 -1 0 ${pageHeight} cm`,
@@ -479,21 +503,32 @@
           for (let column = 0; column < qr.size; column += 1) {
             if (qr.isDark(row, column)) {
               commands.push(
-                `${pdfPoint(column * moduleSize)} ${pdfPoint(row * moduleSize)} ` +
+                `${pdfPoint(qrOffset + column * moduleSize)} ` +
+                `${pdfPoint(QR_IMAGE_TOP_MM + row * moduleSize)} ` +
                 `${pdfPoint(moduleSize)} ${pdfPoint(moduleSize)} re`
               );
             }
           }
         }
 
-        commands.push("f", "Q");
+        commands.push(
+          "f",
+          "Q",
+          "BT",
+          `/F1 ${pdfNumber(labelFontSize)} Tf`,
+          "0 0 0 rg",
+          `${pdfNumber(labelX)} ${pdfPoint(LABEL_BASELINE_MM)} Td`,
+          `(${escapePdfText(label)}) Tj`,
+          "ET"
+        );
 
         return commands.join("\n");
       }
 
       function createPdfDocument(pageContents) {
         const pageSize = pdfPoint(PAGE_SIZE_MM);
-        const objectCount = 2 + pageContents.length * 2;
+        const fontObjectId = 3 + pageContents.length * 2;
+        const objectCount = fontObjectId;
         const objects = new Array(objectCount + 1);
         const pageRefs = pageContents
           .map((_, index) => `${3 + index * 2} 0 R`)
@@ -506,10 +541,12 @@
           const pageObjectId = 3 + index * 2;
           const contentObjectId = pageObjectId + 1;
           objects[pageObjectId] =
-            `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageSize} ${pageSize}] /Contents ${contentObjectId} 0 R >>`;
+            `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageSize} ${pageSize}] /Resources << /Font << /F1 ${fontObjectId} 0 R >> >> /Contents ${contentObjectId} 0 R >>`;
           objects[contentObjectId] =
             `<< /Length ${content.length} >>\nstream\n${content}\nendstream`;
         });
+
+        objects[fontObjectId] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>";
 
         let pdf = "%PDF-1.4\n";
         const offsets = [0];
@@ -555,7 +592,8 @@
 
         for (const hallGroup of hallGroups) {
           forEachHallSequence(hallGroup, (range, sequence) => {
-            pageContents.push(createPdfPage(formatQrValue(range, sequence)));
+            const qrCodeValue = formatQrCodeValue(range, sequence);
+            pageContents.push(createPdfPage(formatQrValue(range, sequence), qrCodeValue));
             completed += 1;
           });
 
