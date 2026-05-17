@@ -202,11 +202,18 @@
       const STORAGE_KEY = "center-qr-print-settings";
       const RENDER_BATCH_SIZE = 100;
       const MM_TO_PT = 72 / 25.4;
-      const PAGE_SIZE_MM = 30;
-      const QR_IMAGE_SIZE_MM = 23;
-      const QR_IMAGE_TOP_MM = 2;
-      const LABEL_MAX_WIDTH_MM = 28;
-      const LABEL_BASELINE_MM = 2.1;
+      const SHEET_WIDTH_MM = 900;
+      const SHEET_HEIGHT_MM = 284;
+      const QR_COLUMNS_PER_PAGE = 27;
+      const QR_ROWS_PER_PAGE = 6;
+      const QR_ITEMS_PER_PAGE = QR_COLUMNS_PER_PAGE * QR_ROWS_PER_PAGE;
+      const QR_IMAGE_SIZE_MM = 26.6;
+      const QR_COLUMN_STEP_MM = 33;
+      const QR_ROW_STEP_MM = 38;
+      const QR_IMAGE_LEFT_MM = 7.7;
+      const QR_IMAGE_TOP_MARGIN_MM = 32.5;
+      const LABEL_FONT_SIZE_PT = 3.8;
+      const LABEL_OFFSET_BELOW_QR_MM = 2.35;
       const SEQUENCE_DIGITS = 4;
       const QR_SCAN_PREFIX = "https://app.madarapp.com/scan?qrCode=";
       const collator = new Intl.Collator("en", {
@@ -474,81 +481,109 @@
         return String(value).replace(/[\\()]/g, "\\$&");
       }
 
-      function getLabelFontSize(label) {
-        const estimatedTextWidthAtOnePoint = Math.max(label.length * 0.55, 1);
-        return Math.max(
-          3,
-          Math.min(5, mm(LABEL_MAX_WIDTH_MM) / estimatedTextWidthAtOnePoint)
-        );
+      function getLabelX(label, imageX) {
+        const estimatedLabelWidth = label.length * LABEL_FONT_SIZE_PT * 0.5262;
+        return mm(imageX) + Math.max(0, (mm(QR_IMAGE_SIZE_MM) - estimatedLabelWidth) / 2);
       }
 
-      function createPdfPage(value, label) {
-        const qr = createQrMatrix(value);
-        const moduleSize = QR_IMAGE_SIZE_MM / qr.size;
-        const qrOffset = (PAGE_SIZE_MM - QR_IMAGE_SIZE_MM) / 2;
-        const pageHeight = pdfPoint(PAGE_SIZE_MM);
-        const labelFontSize = getLabelFontSize(label);
-        const estimatedLabelWidth = label.length * labelFontSize * 0.55;
-        const labelX = Math.max(0, (mm(PAGE_SIZE_MM) - estimatedLabelWidth) / 2);
+      function createPdfPage(items) {
         const commands = [
           "q",
-          `1 0 0 -1 0 ${pageHeight} cm`,
           "1 1 1 rg",
-          `0 0 ${pdfPoint(PAGE_SIZE_MM)} ${pdfPoint(PAGE_SIZE_MM)} re`,
+          `0 0 ${pdfPoint(SHEET_WIDTH_MM)} ${pdfPoint(SHEET_HEIGHT_MM)} re`,
           "f",
           "0 0 0 rg",
         ];
 
-        for (let row = 0; row < qr.size; row += 1) {
-          for (let column = 0; column < qr.size; column += 1) {
-            if (qr.isDark(row, column)) {
-              commands.push(
-                `${pdfPoint(qrOffset + column * moduleSize)} ` +
-                `${pdfPoint(QR_IMAGE_TOP_MM + row * moduleSize)} ` +
-                `${pdfPoint(moduleSize)} ${pdfPoint(moduleSize)} re`
-              );
+        items.forEach(({ value }, index) => {
+          const qr = createQrMatrix(value);
+          const moduleSize = QR_IMAGE_SIZE_MM / qr.size;
+          const rowIndex = Math.floor(index / QR_COLUMNS_PER_PAGE);
+          const columnIndex = index % QR_COLUMNS_PER_PAGE;
+          const imageX = QR_IMAGE_LEFT_MM + columnIndex * QR_COLUMN_STEP_MM;
+          const imageY =
+            SHEET_HEIGHT_MM -
+            QR_IMAGE_TOP_MARGIN_MM -
+            QR_IMAGE_SIZE_MM -
+            rowIndex * QR_ROW_STEP_MM;
+
+          for (let row = 0; row < qr.size; row += 1) {
+            for (let column = 0; column < qr.size; column += 1) {
+              if (qr.isDark(row, column)) {
+                commands.push(
+                  `${pdfPoint(imageX + column * moduleSize)} ` +
+                  `${pdfPoint(imageY + (qr.size - row - 1) * moduleSize)} ` +
+                  `${pdfPoint(moduleSize)} ${pdfPoint(moduleSize)} re`
+                );
+              }
             }
           }
-        }
+        });
 
-        commands.push(
-          "f",
-          "Q",
-          "BT",
-          `/F1 ${pdfNumber(labelFontSize)} Tf`,
-          "0 0 0 rg",
-          `${pdfNumber(labelX)} ${pdfPoint(LABEL_BASELINE_MM)} Td`,
-          `(${escapePdfText(label)}) Tj`,
-          "ET"
-        );
+        commands.push("f", "Q");
 
-        return commands.join("\n");
+        items.forEach(({ label }, index) => {
+          const rowIndex = Math.floor(index / QR_COLUMNS_PER_PAGE);
+          const columnIndex = index % QR_COLUMNS_PER_PAGE;
+          const imageX = QR_IMAGE_LEFT_MM + columnIndex * QR_COLUMN_STEP_MM;
+          const imageY =
+            SHEET_HEIGHT_MM -
+            QR_IMAGE_TOP_MARGIN_MM -
+            QR_IMAGE_SIZE_MM -
+            rowIndex * QR_ROW_STEP_MM;
+
+          commands.push(
+            "BT",
+            `/F1 ${pdfNumber(LABEL_FONT_SIZE_PT)} Tf`,
+            "0 0 0 rg",
+            `${pdfNumber(getLabelX(label, imageX))} ${pdfPoint(imageY - LABEL_OFFSET_BELOW_QR_MM)} Td`,
+            `(${escapePdfText(label)}) Tj`,
+            "ET"
+          );
+        });
+
+        return {
+          content: commands.join("\n"),
+          widthMm: SHEET_WIDTH_MM,
+          heightMm: SHEET_HEIGHT_MM,
+        };
       }
 
-      function createPdfDocument(pageContents) {
-        const pageSize = pdfPoint(PAGE_SIZE_MM);
-        const fontObjectId = 3 + pageContents.length * 2;
+      function createPdfPages(items) {
+        const pages = [];
+
+        for (let index = 0; index < items.length; index += QR_ITEMS_PER_PAGE) {
+          pages.push(createPdfPage(items.slice(index, index + QR_ITEMS_PER_PAGE)));
+        }
+
+        return pages;
+      }
+
+      function createPdfDocument(pages) {
+        const fontObjectId = 3 + pages.length * 2;
         const objectCount = fontObjectId;
         const objects = new Array(objectCount + 1);
-        const pageRefs = pageContents
+        const pageRefs = pages
           .map((_, index) => `${3 + index * 2} 0 R`)
           .join(" ");
 
         objects[1] = "<< /Type /Catalog /Pages 2 0 R >>";
-        objects[2] = `<< /Type /Pages /Kids [${pageRefs}] /Count ${pageContents.length} >>`;
+        objects[2] = `<< /Type /Pages /Kids [${pageRefs}] /Count ${pages.length} >>`;
 
-        pageContents.forEach((content, index) => {
+        pages.forEach((page, index) => {
           const pageObjectId = 3 + index * 2;
           const contentObjectId = pageObjectId + 1;
+          const pageWidth = pdfPoint(page.widthMm);
+          const pageHeight = pdfPoint(page.heightMm);
           objects[pageObjectId] =
-            `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageSize} ${pageSize}] /Resources << /Font << /F1 ${fontObjectId} 0 R >> >> /Contents ${contentObjectId} 0 R >>`;
+            `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 ${fontObjectId} 0 R >> >> /Contents ${contentObjectId} 0 R >>`;
           objects[contentObjectId] =
-            `<< /Length ${content.length} >>\nstream\n${content}\nendstream`;
+            `<< /Length ${page.content.length} >>\nstream\n${page.content}\nendstream`;
         });
 
         objects[fontObjectId] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>";
 
-        let pdf = "%PDF-1.4\n";
+        let pdf = "%PDF-1.3\n";
         const offsets = [0];
 
         for (let objectId = 1; objectId < objects.length; objectId += 1) {
@@ -582,8 +617,8 @@
         setTimeout(() => URL.revokeObjectURL(url), 0);
       }
 
-      async function createPageContentsForHallGroups(hallGroups, onProgress) {
-        const pageContents = [];
+      async function createQrItemsForHallGroups(hallGroups, onProgress) {
+        const qrItems = [];
         const total = hallGroups.reduce(
           (sum, hallGroup) => sum + hallGroup.total,
           0
@@ -593,7 +628,10 @@
         for (const hallGroup of hallGroups) {
           forEachHallSequence(hallGroup, (range, sequence) => {
             const qrCodeValue = formatQrCodeValue(range, sequence);
-            pageContents.push(createPdfPage(formatQrValue(range, sequence), qrCodeValue));
+            qrItems.push({
+              value: formatQrValue(range, sequence),
+              label: qrCodeValue,
+            });
             completed += 1;
           });
 
@@ -601,7 +639,7 @@
           await new Promise((resolve) => requestAnimationFrame(resolve));
         }
 
-        return pageContents;
+        return qrItems;
       }
 
       function getHallPdfFileName(hallGroup) {
@@ -618,7 +656,7 @@
         status.textContent = `جاري إنشاء PDF للصالة ${hallGroup.hall}...`;
 
         try {
-          const pageContents = await createPageContentsForHallGroups(
+          const qrItems = await createQrItemsForHallGroups(
             [hallGroup],
             (completed, total) => {
               status.textContent =
@@ -627,7 +665,7 @@
             }
           );
 
-          downloadBlob(createPdfDocument(pageContents), fileName);
+          downloadBlob(createPdfDocument(createPdfPages(qrItems)), fileName);
           saveSettings();
           status.textContent = `تم تحميل ${fileName}.`;
         } finally {
@@ -643,7 +681,7 @@
         status.textContent = `جاري إنشاء PDF واحد للمركز ${settings.centerNumber}...`;
 
         try {
-          const pageContents = await createPageContentsForHallGroups(
+          const qrItems = await createQrItemsForHallGroups(
             settings.hallGroups,
             (completed, total) => {
               status.textContent =
@@ -652,7 +690,7 @@
             }
           );
 
-          downloadBlob(createPdfDocument(pageContents), fileName);
+          downloadBlob(createPdfDocument(createPdfPages(qrItems)), fileName);
           saveSettings();
           status.textContent = `تم تحميل ${fileName}.`;
         } finally {
@@ -671,7 +709,7 @@
         try {
           for (const hallGroup of settings.hallGroups) {
             const fileName = getHallPdfFileName(hallGroup);
-            const pageContents = await createPageContentsForHallGroups(
+            const qrItems = await createQrItemsForHallGroups(
               [hallGroup],
               (completed, total) => {
                 status.textContent =
@@ -680,7 +718,7 @@
               }
             );
 
-            downloadBlob(createPdfDocument(pageContents), fileName);
+            downloadBlob(createPdfDocument(createPdfPages(qrItems)), fileName);
             completedHalls += 1;
             status.textContent =
               `تم إنشاء ${completedHalls.toLocaleString()} من ` +
