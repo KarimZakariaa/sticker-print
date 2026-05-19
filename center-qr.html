@@ -181,6 +181,7 @@
 
       <div class="actions">
         <button type="button" id="downloadCenterPdfButton">تحميل PDF للمركز</button>
+        <button type="button" id="downloadAllCentersPdfButton" class="secondary">تحميل PDF منفصل لكل مركز</button>
         <button type="button" id="downloadHallPdfButton" class="secondary">تحميل PDF منفصل لكل صالة</button>
       </div>
       <div class="status" id="status"></div>
@@ -202,18 +203,29 @@
       const STORAGE_KEY = "center-qr-print-settings";
       const RENDER_BATCH_SIZE = 100;
       const MM_TO_PT = 72 / 25.4;
-      const SHEET_WIDTH_MM = 900;
-      const SHEET_HEIGHT_MM = 284;
-      const QR_COLUMNS_PER_PAGE = 27;
-      const QR_ROWS_PER_PAGE = 6;
+      const QR_COLUMNS_PER_PAGE = 30;
+      const QR_ROWS_PER_PAGE = 99;
       const QR_ITEMS_PER_PAGE = QR_COLUMNS_PER_PAGE * QR_ROWS_PER_PAGE;
       const QR_IMAGE_SIZE_MM = 26.6;
-      const QR_COLUMN_STEP_MM = 33;
-      const QR_ROW_STEP_MM = 38;
-      const QR_IMAGE_LEFT_MM = 7.7;
-      const QR_IMAGE_TOP_MARGIN_MM = 32.5;
-      const LABEL_FONT_SIZE_PT = 3.8;
-      const LABEL_OFFSET_BELOW_QR_MM = 2.35;
+      const QR_CELL_SIZE_PX = 354;
+      const QR_CELL_SIDE_SPACE_PX = 20;
+      const QR_CELL_VERTICAL_SPACE_PX = 29;
+      const QR_CONTENT_SIZE_PX = QR_CELL_SIZE_PX - QR_CELL_SIDE_SPACE_PX * 2;
+      const QR_CELL_STEP_MM = QR_IMAGE_SIZE_MM * (QR_CELL_SIZE_PX / QR_CONTENT_SIZE_PX);
+      const QR_CELL_SIDE_SPACE_MM = QR_IMAGE_SIZE_MM * (QR_CELL_SIDE_SPACE_PX / QR_CONTENT_SIZE_PX);
+      const QR_CELL_VERTICAL_SPACE_MM = QR_IMAGE_SIZE_MM * (QR_CELL_VERTICAL_SPACE_PX / QR_CONTENT_SIZE_PX);
+      const QR_COLUMN_STEP_MM = QR_CELL_STEP_MM;
+      const QR_IMAGE_LEFT_MM = QR_CELL_SIDE_SPACE_MM;
+      const QR_IMAGE_TOP_MARGIN_MM = QR_CELL_VERTICAL_SPACE_MM;
+      const LABEL_FONT_SIZE_PT = 5.6;
+      const LABEL_WIDTH_FACTOR = 0.5262;
+      const LABEL_BACKGROUND_PADDING_X_MM = 0.9;
+      const LABEL_BACKGROUND_HEIGHT_MM = 3;
+      const LABEL_BACKGROUND_BOTTOM_MARGIN_MM = 1.1;
+      const LABEL_TEXT_BASELINE_OFFSET_MM = 0.9;
+      const QR_ROW_STEP_MM = QR_CELL_STEP_MM;
+      const SHEET_WIDTH_MM = QR_IMAGE_LEFT_MM + QR_COLUMNS_PER_PAGE * QR_COLUMN_STEP_MM;
+      const SHEET_HEIGHT_MM = QR_IMAGE_TOP_MARGIN_MM + QR_ROWS_PER_PAGE * QR_ROW_STEP_MM;
       const SEQUENCE_DIGITS = 4;
       const QR_SCAN_PREFIX = "https://app.madarapp.com/scan?qrCode=";
       const collator = new Intl.Collator("en", {
@@ -227,12 +239,14 @@
       const status = document.getElementById("status");
       const hallGrid = document.getElementById("hallGrid");
       const downloadCenterPdfButton = document.getElementById("downloadCenterPdfButton");
+      const downloadAllCentersPdfButton = document.getElementById("downloadAllCentersPdfButton");
       const downloadHallPdfButton = document.getElementById("downloadHallPdfButton");
 
       let hallRows = [];
 
       function setBusy(isBusy) {
         downloadCenterPdfButton.disabled = isBusy;
+        downloadAllCentersPdfButton.disabled = isBusy;
         downloadHallPdfButton.disabled = isBusy;
         hallGrid.querySelectorAll(".hall-pdf-button").forEach((button) => {
           button.disabled = isBusy;
@@ -406,6 +420,27 @@
         };
       }
 
+      function getSettingsForCenter(centerNumber) {
+        const hallGroups = getHallGroupsForCenter(centerNumber);
+
+        if (hallGroups.length === 0) {
+          throw new Error(`لا توجد صالات للمركز ${centerNumber}.`);
+        }
+
+        const totalNumber = hallGroups.reduce(
+          (total, hallGroup) => total + hallGroup.total,
+          0
+        );
+
+        return {
+          boxNumber: boxInput.value,
+          centerNumber,
+          totalNumber,
+          count: totalNumber,
+          hallGroups,
+        };
+      }
+
       function formatQrCodeValue(range, sequence) {
         return `${range.square}-${range.center}-${range.hall}-${String(sequence).padStart(SEQUENCE_DIGITS, "0")}`
           .replace(/\s+/g, "");
@@ -467,7 +502,7 @@
       }
 
       function createQrMatrix(value) {
-        const qr = qrcode(0, "M");
+        const qr = qrcode(0, "H");
         qr.addData(value, "Byte");
         qr.make();
 
@@ -481,9 +516,28 @@
         return String(value).replace(/[\\()]/g, "\\$&");
       }
 
+      function getEstimatedLabelWidthPt(label) {
+        return label.length * LABEL_FONT_SIZE_PT * LABEL_WIDTH_FACTOR;
+      }
+
       function getLabelX(label, imageX) {
-        const estimatedLabelWidth = label.length * LABEL_FONT_SIZE_PT * 0.5262;
+        const estimatedLabelWidth = getEstimatedLabelWidthPt(label);
         return mm(imageX) + Math.max(0, (mm(QR_IMAGE_SIZE_MM) - estimatedLabelWidth) / 2);
+      }
+
+      function getLabelBackground(label, imageX, imageY) {
+        const labelWidthMm = getEstimatedLabelWidthPt(label) / MM_TO_PT;
+        const widthMm = Math.min(
+          QR_IMAGE_SIZE_MM,
+          labelWidthMm + LABEL_BACKGROUND_PADDING_X_MM * 2
+        );
+
+        return {
+          xMm: imageX + (QR_IMAGE_SIZE_MM - widthMm) / 2,
+          yMm: imageY + LABEL_BACKGROUND_BOTTOM_MARGIN_MM,
+          widthMm,
+          heightMm: LABEL_BACKGROUND_HEIGHT_MM,
+        };
       }
 
       function createPdfPage(items) {
@@ -531,12 +585,20 @@
             QR_IMAGE_TOP_MARGIN_MM -
             QR_IMAGE_SIZE_MM -
             rowIndex * QR_ROW_STEP_MM;
+          const labelBackground = getLabelBackground(label, imageX, imageY);
 
           commands.push(
+            "q",
+            "1 1 1 rg",
+            `${pdfPoint(labelBackground.xMm)} ${pdfPoint(labelBackground.yMm)} ` +
+              `${pdfPoint(labelBackground.widthMm)} ${pdfPoint(labelBackground.heightMm)} re`,
+            "f",
+            "Q",
             "BT",
             `/F1 ${pdfNumber(LABEL_FONT_SIZE_PT)} Tf`,
             "0 0 0 rg",
-            `${pdfNumber(getLabelX(label, imageX))} ${pdfPoint(imageY - LABEL_OFFSET_BELOW_QR_MM)} Td`,
+            `${pdfNumber(getLabelX(label, imageX))} ` +
+              `${pdfPoint(labelBackground.yMm + LABEL_TEXT_BASELINE_OFFSET_MM)} Td`,
             `(${escapePdfText(label)}) Tj`,
             "ET"
           );
@@ -649,6 +711,10 @@
         );
       }
 
+      function getCenterPdfFileName(settings) {
+        return `center-qr-center-${settings.centerNumber}.pdf`;
+      }
+
       async function downloadSingleHallPdf(hallGroup) {
         const fileName = getHallPdfFileName(hallGroup);
 
@@ -675,7 +741,7 @@
 
       async function downloadCenterPdf() {
         const settings = getSettings();
-        const fileName = `center-qr-center-${settings.centerNumber}.pdf`;
+        const fileName = getCenterPdfFileName(settings);
 
         setBusy(true);
         status.textContent = `جاري إنشاء PDF واحد للمركز ${settings.centerNumber}...`;
@@ -693,6 +759,52 @@
           downloadBlob(createPdfDocument(createPdfPages(qrItems)), fileName);
           saveSettings();
           status.textContent = `تم تحميل ${fileName}.`;
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      async function downloadAllCenterPdfs() {
+        if (hallRows.length === 0) {
+          throw new Error("جاري تحميل بيانات الصالات.");
+        }
+
+        const centers = getAvailableCentersForBox(boxInput.value);
+
+        if (centers.length === 0) {
+          throw new Error("لا توجد مراكز لهذا المربع.");
+        }
+
+        let completedCenters = 0;
+
+        setBusy(true);
+        status.textContent =
+          `جاري إنشاء ${centers.length.toLocaleString()} ملفات PDF للمراكز في المربع ${boxInput.value}...`;
+
+        try {
+          for (const centerNumber of centers) {
+            const settings = getSettingsForCenter(centerNumber);
+            const fileName = getCenterPdfFileName(settings);
+            const qrItems = await createQrItemsForHallGroups(
+              settings.hallGroups,
+              (completed, total) => {
+                status.textContent =
+                  `جاري إنشاء PDF للمركز ${centerNumber}... ` +
+                  `${completed.toLocaleString()} من ${total.toLocaleString()} مكتمل.`;
+              }
+            );
+
+            downloadBlob(createPdfDocument(createPdfPages(qrItems)), fileName);
+            completedCenters += 1;
+            status.textContent =
+              `تم إنشاء ${completedCenters.toLocaleString()} من ` +
+              `${centers.length.toLocaleString()} ملفات PDF للمراكز في المربع ${boxInput.value}.`;
+            await new Promise((resolve) => requestAnimationFrame(resolve));
+          }
+
+          saveSettings();
+          status.textContent =
+            `تم تحميل ${centers.length.toLocaleString()} ملفات PDF للمراكز في المربع ${boxInput.value}.`;
         } finally {
           setBusy(false);
         }
@@ -825,6 +937,13 @@
 
       downloadCenterPdfButton.addEventListener("click", () => {
         downloadCenterPdf().catch((error) => {
+          status.textContent = error.message;
+          setBusy(false);
+        });
+      });
+
+      downloadAllCentersPdfButton.addEventListener("click", () => {
+        downloadAllCenterPdfs().catch((error) => {
           status.textContent = error.message;
           setBusy(false);
         });
